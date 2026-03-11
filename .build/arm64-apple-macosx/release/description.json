@@ -1,0 +1,221 @@
+{
+  "builtTestProducts" : [
+
+  ],
+  "copyCommands" : {
+
+  },
+  "explicitTargetDependencyImportCheckingMode" : {
+    "none" : {
+
+    }
+  },
+  "generatedSourceTargetSet" : [
+
+  ],
+  "pluginDescriptions" : [
+
+  ],
+  "swiftCommands" : {
+    "C.macos-installer-usb-builder-arm64-apple-macosx26.0-release.module" : {
+      "executable" : "/Library/Developer/CommandLineTools/usr/bin/swiftc",
+      "fileList" : "/Users/user/Desktop/Projects/usb-installer-v2/.build/arm64-apple-macosx/release/macos_installer_usb_builder.build/sources",
+      "importPath" : "/Users/user/Desktop/Projects/usb-installer-v2/.build/arm64-apple-macosx/release/Modules",
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/user/Desktop/Projects/usb-installer-v2/Sources/macos-installer-usb-builder/macos_installer_usb_builder.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/user/Desktop/Projects/usb-installer-v2/.build/arm64-apple-macosx/release/swift-version--1AB21518FC5DEDBE.txt"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/user/Desktop/Projects/usb-installer-v2/.build/arm64-apple-macosx/release/macos_installer_usb_builder.build/sources"
+        }
+      ],
+      "isLibrary" : false,
+      "moduleName" : "macos_installer_usb_builder",
+      "moduleOutputPath" : "/Users/user/Desktop/Projects/usb-installer-v2/.build/arm64-apple-macosx/release/Modules/macos_installer_usb_builder.swiftmodule",
+      "objects" : [
+        "/Users/user/Desktop/Projects/usb-installer-v2/.build/arm64-apple-macosx/release/macos_installer_usb_builder.build/macos_installer_usb_builder.swift.o"
+      ],
+      "otherArguments" : [
+        "-target",
+        "arm64-apple-macosx14.0",
+        "-whole-module-optimization",
+        "-num-threads",
+        "10",
+        "-serialize-diagnostics",
+        "-O",
+        "-j10",
+        "-DSWIFT_PACKAGE",
+        "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+        "-module-cache-path",
+        "/Users/user/Desktop/Projects/usb-installer-v2/.build/arm64-apple-macosx/release/ModuleCache",
+        "-parseable-output",
+        "-Xfrontend",
+        "-entry-point-function-name",
+        "-Xfrontend",
+        "macos_installer_usb_builder_main",
+        "-parse-as-library",
+        "-swift-version",
+        "6",
+        "-I",
+        "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
+        "-L",
+        "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
+        "-plugin-path",
+        "/Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing",
+        "-sdk",
+        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+        "-g",
+        "-Xcc",
+        "-isysroot",
+        "-Xcc",
+        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+        "-Xcc",
+        "-fPIC",
+        "-Xcc",
+        "-g",
+        "-package-name",
+        "usb_installer_v2"
+      ],
+      "outputFileMapPath" : "/Users/user/Desktop/Projects/usb-installer-v2/.build/arm64-apple-macosx/release/macos_installer_usb_builder.build/output-file-map.json",
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/user/Desktop/Projects/usb-installer-v2/.build/arm64-apple-macosx/release/macos_installer_usb_builder.build/macos_installer_usb_builder.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/user/Desktop/Projects/usb-installer-v2/.build/arm64-apple-macosx/release/Modules/macos_installer_usb_builder.swiftmodule"
+        }
+      ],
+      "prepareForIndexing" : false,
+      "sources" : [
+        "/Users/user/Desktop/Projects/usb-installer-v2/Sources/macos-installer-usb-builder/macos_installer_usb_builder.swift"
+      ],
+      "tempsPath" : "/Users/user/Desktop/Projects/usb-installer-v2/.build/arm64-apple-macosx/release/macos_installer_usb_builder.build",
+      "wholeModuleOptimization" : true
+    }
+  },
+  "swiftFrontendCommands" : {
+
+  },
+  "swiftTargetScanArgs" : {
+    "macos_installer_usb_builder" : [
+      "/Library/Developer/CommandLineTools/usr/bin/swiftc",
+      "-module-name",
+      "macos_installer_usb_builder",
+      "-package-name",
+      "usb_installer_v2",
+      "-c",
+      "/Users/user/Desktop/Projects/usb-installer-v2/Sources/macos-installer-usb-builder/macos_installer_usb_builder.swift",
+      "-I",
+      "/Users/user/Desktop/Projects/usb-installer-v2/.build/arm64-apple-macosx/release/Modules",
+      "-target",
+      "arm64-apple-macosx14.0",
+      "-whole-module-optimization",
+      "-num-threads",
+      "10",
+      "-serialize-diagnostics",
+      "-O",
+      "-j10",
+      "-DSWIFT_PACKAGE",
+      "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+      "-module-cache-path",
+      "/Users/user/Desktop/Projects/usb-installer-v2/.build/arm64-apple-macosx/release/ModuleCache",
+      "-parseable-output",
+      "-Xfrontend",
+      "-entry-point-function-name",
+      "-Xfrontend",
+      "macos_installer_usb_builder_main",
+      "-parse-as-library",
+      "-swift-version",
+      "6",
+      "-I",
+      "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
+      "-L",
+      "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
+      "-plugin-path",
+      "/Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing",
+      "-sdk",
+      "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+      "-g",
+      "-Xcc",
+      "-isysroot",
+      "-Xcc",
+      "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+      "-Xcc",
+      "-fPIC",
+      "-Xcc",
+      "-g",
+      "-package-name",
+      "usb_installer_v2",
+      "-driver-use-frontend-path",
+      "/Library/Developer/CommandLineTools/usr/bin/swiftc"
+    ]
+  },
+  "targetDependencyMap" : {
+    "macos_installer_usb_builder" : [
+
+    ]
+  },
+  "testDiscoveryCommands" : {
+
+  },
+  "testEntryPointCommands" : {
+
+  },
+  "traitConfiguration" : {
+    "default" : {
+
+    }
+  },
+  "writeCommands" : {
+    "/Users/user/Desktop/Projects/usb-installer-v2/.build/arm64-apple-macosx/release/FlashForge.product/Objects.LinkFileList" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<link-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/user/Desktop/Projects/usb-installer-v2/.build/arm64-apple-macosx/release/macos_installer_usb_builder.build/macos_installer_usb_builder.swift.o"
+        }
+      ],
+      "outputFilePath" : "/Users/user/Desktop/Projects/usb-installer-v2/.build/arm64-apple-macosx/release/FlashForge.product/Objects.LinkFileList"
+    },
+    "/Users/user/Desktop/Projects/usb-installer-v2/.build/arm64-apple-macosx/release/macos_installer_usb_builder.build/sources" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<sources-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/user/Desktop/Projects/usb-installer-v2/Sources/macos-installer-usb-builder/macos_installer_usb_builder.swift"
+        }
+      ],
+      "outputFilePath" : "/Users/user/Desktop/Projects/usb-installer-v2/.build/arm64-apple-macosx/release/macos_installer_usb_builder.build/sources"
+    },
+    "/Users/user/Desktop/Projects/usb-installer-v2/.build/arm64-apple-macosx/release/swift-version--1AB21518FC5DEDBE.txt" : {
+      "alwaysOutOfDate" : true,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<swift-get-version>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Library/Developer/CommandLineTools/usr/bin/swiftc"
+        }
+      ],
+      "outputFilePath" : "/Users/user/Desktop/Projects/usb-installer-v2/.build/arm64-apple-macosx/release/swift-version--1AB21518FC5DEDBE.txt"
+    }
+  }
+}
