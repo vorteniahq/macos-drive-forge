@@ -116,6 +116,7 @@ final class AppModel: ObservableObject {
     // V2: feedback state
     @Published var isRefreshing = false
     @Published var isDownloading = false
+    @Published var downloadProgress: Double = 0
     @Published var toasts: [ToastMessage] = []
     @Published var currentPhase: WorkflowPhase = .selectInstaller
 
@@ -396,12 +397,35 @@ final class AppModel: ObservableObject {
         appendLog("Downloading \(version.displayName) from Apple (this may take several minutes)...")
         status = "Downloading \(version.version)..."
         isDownloading = true
+        downloadProgress = 0
         showToast("Downloading \(version.version) from Apple...", style: .info)
-        _ = try await shell.run(
+        let versionStr = version.version
+        _ = try await shell.runStreaming(
             "/usr/sbin/softwareupdate",
-            ["--fetch-full-installer", "--full-installer-version", version.version]
-        )
+            ["--fetch-full-installer", "--full-installer-version", versionStr]
+        ) { output in
+            // Parse progress from softwareupdate output (e.g. "Installing: 45.0%")
+            let lines = output.components(separatedBy: .newlines)
+            for line in lines {
+                if let range = line.range(of: #"(\d+\.?\d*)%"#, options: .regularExpression) {
+                    let numStr = line[range].dropLast() // drop the %
+                    if let pct = Double(numStr) {
+                        DispatchQueue.main.async { [weak self] in
+                            self?.downloadProgress = pct / 100.0
+                            self?.status = "Downloading \(versionStr)... \(Int(pct))%"
+                        }
+                    }
+                }
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                if !trimmed.isEmpty {
+                    DispatchQueue.main.async { [weak self] in
+                        self?.appendLog(trimmed)
+                    }
+                }
+            }
+        }
         isDownloading = false
+        downloadProgress = 1.0
 
         guard let downloaded = findNewestInstallerInApplications() else {
             throw AppError("Downloaded installer not found in /Applications -- check System Settings > Software Update")
@@ -417,6 +441,38 @@ final class AppModel: ObservableObject {
         showToast("Installer cached: \(version.version)", style: .success)
         refreshStash()
         return dest
+    }
+
+    // MARK: Download Only
+
+    func downloadOnly() {
+        guard let installer = selectedInstaller else {
+            showToast("Select an installer first", style: .warning)
+            return
+        }
+        if isCached(installer) {
+            showToast("\(installer.version) is already in stash", style: .info)
+            return
+        }
+        creating = true
+        isDownloading = true
+        status = "Downloading \(installer.version)..."
+
+        Task {
+            do {
+                let stash = expandTilde(stashPath)
+                try FileManager.default.createDirectory(atPath: stash, withIntermediateDirectories: true)
+                _ = try await ensureInstaller(version: installer, stash: stash)
+                status = "Downloaded \(installer.version)"
+                showToast("Downloaded \(installer.displayName)", style: .success)
+            } catch {
+                status = "Download failed"
+                appendLog("ERROR: \(error.localizedDescription)")
+                showToast("Download failed: \(error.localizedDescription)", style: .error)
+            }
+            creating = false
+            isDownloading = false
+        }
     }
 
     // MARK: Actions
@@ -585,6 +641,17 @@ struct ShellOutput {
     let code: Int32
 }
 
+final class StreamCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _outData = Data()
+    private var _errData = Data()
+
+    func appendOut(_ data: Data) { lock.lock(); _outData.append(data); lock.unlock() }
+    func appendErr(_ data: Data) { lock.lock(); _errData.append(data); lock.unlock() }
+    var outString: String { lock.lock(); defer { lock.unlock() }; return String(data: _outData, encoding: .utf8) ?? "" }
+    var errString: String { lock.lock(); defer { lock.unlock() }; return String(data: _errData, encoding: .utf8) ?? "" }
+}
+
 actor Shell {
     func run(_ command: String, _ arguments: [String], requireSudo: Bool = false) async throws -> ShellOutput {
         let process = Process()
@@ -626,6 +693,53 @@ actor Shell {
         try? process.run()
         process.waitUntilExit()
         return String(data: outPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)
+    }
+
+    func runStreaming(_ command: String, _ arguments: [String], onOutput: @Sendable @escaping (String) -> Void) async throws -> ShellOutput {
+        let process = Process()
+        let outPipe = Pipe(), errPipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: command)
+        process.arguments = arguments
+        process.standardOutput = outPipe
+        process.standardError = errPipe
+
+        let collected = StreamCollector()
+
+        outPipe.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            if !data.isEmpty {
+                collected.appendOut(data)
+                if let str = String(data: data, encoding: .utf8) {
+                    onOutput(str)
+                }
+            }
+        }
+
+        errPipe.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            if !data.isEmpty {
+                collected.appendErr(data)
+                if let str = String(data: data, encoding: .utf8) {
+                    onOutput(str)
+                }
+            }
+        }
+
+        try process.run()
+        process.waitUntilExit()
+
+        outPipe.fileHandleForReading.readabilityHandler = nil
+        errPipe.fileHandleForReading.readabilityHandler = nil
+
+        let out = collected.outString
+        let err = collected.errString
+
+        guard process.terminationStatus == 0 else {
+            throw NSError(domain: "shell", code: Int(process.terminationStatus), userInfo: [
+                NSLocalizedDescriptionKey: err.isEmpty ? "Command failed (exit \(process.terminationStatus))" : err
+            ])
+        }
+        return ShellOutput(stdout: out, stderr: err, code: process.terminationStatus)
     }
 
     private func shQuote(_ value: String) -> String {
@@ -692,7 +806,7 @@ struct ContentView: View {
             .padding(.trailing, 20)
             .animation(.spring(response: 0.4), value: model.toasts.count)
         }
-        .frame(minWidth: 960, minHeight: 720)
+        .frame(minWidth: 900, minHeight: 500, idealHeight: 700)
         .onAppear {
             stashPathInput = model.stashPath
             model.refreshAll()
@@ -859,15 +973,62 @@ struct ContentView: View {
                         .font(.caption)
                 }
             } else {
-                Picker("", selection: $model.selectedInstaller) {
-                    Text("Select...").tag(Optional<InstallerVersion>.none)
-                    ForEach(model.installers) { v in
-                        InstallerPickerLabel(installer: v, isCached: model.isCached(v))
-                            .tag(Optional(v))
+                VStack(alignment: .leading, spacing: 8) {
+                    Picker("", selection: $model.selectedInstaller) {
+                        Text("Select...").tag(Optional<InstallerVersion>.none)
+                        ForEach(model.installers) { v in
+                            InstallerPickerLabel(installer: v, isCached: model.isCached(v))
+                                .tag(Optional(v))
+                        }
+                    }
+                    .labelsHidden()
+                    .onChange(of: model.selectedInstaller) { _, _ in model.updatePhase() }
+
+                    HStack(spacing: 8) {
+                        Button {
+                            model.downloadOnly()
+                        } label: {
+                            HStack(spacing: 4) {
+                                if model.isDownloading {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                        .scaleEffect(0.7)
+                                } else {
+                                    Image(systemName: "arrow.down.circle.fill")
+                                        .font(.system(size: 11))
+                                }
+                                Text(model.isDownloading ? "Downloading..." : "Download Only")
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(model.selectedInstaller == nil || model.creating)
+
+                        if let sel = model.selectedInstaller, model.isCached(sel) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(.green)
+                                    .font(.system(size: 11))
+                                Text("In stash")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.green)
+                            }
+                        }
+                    }
+
+                    if model.isDownloading {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ProgressView(value: model.downloadProgress)
+                                .progressViewStyle(.linear)
+                                .tint(.blue)
+                            Text(model.status)
+                                .font(.system(size: 11))
+                                .foregroundStyle(FFTheme.dimText)
+                        }
+                        .padding(.top, 4)
                     }
                 }
-                .labelsHidden()
-                .onChange(of: model.selectedInstaller) { _, _ in model.updatePhase() }
             }
         }
     }
@@ -1324,6 +1485,6 @@ struct FlashForgeApp: App {
         WindowGroup("FlashForge -- macOS USB Installer Builder") {
             ContentView()
         }
-        .windowResizability(.contentSize)
+        .windowResizability(.contentMinSize)
     }
 }
