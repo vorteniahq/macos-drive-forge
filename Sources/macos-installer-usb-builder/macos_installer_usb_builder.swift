@@ -34,6 +34,15 @@ struct StashedInstaller: Identifiable {
     let appPath: String
     let sizeDescription: String
     let sizeBytes: Int64
+
+    /// Marketing OS name derived from the cached installer app, e.g. "macOS Sonoma".
+    /// Falls back to the version number if the app name can't be read.
+    var osName: String {
+        var name = (appPath as NSString).lastPathComponent  // "Install macOS Sonoma.app"
+        if name.hasSuffix(".app") { name = String(name.dropLast(4)) }
+        if name.hasPrefix("Install ") { name = String(name.dropFirst("Install ".count)) }
+        return name.isEmpty ? "macOS \(version)" : name
+    }
 }
 
 // MARK: - Toast
@@ -112,6 +121,7 @@ final class AppModel: ObservableObject {
     @Published var showDestructiveConfirm = false
     private var pendingDestructiveAction: (() async throws -> Void)?
     @Published var destructiveWarning: String = ""
+    private var downloadWasCancelled = false
 
     // V2: feedback state
     @Published var isRefreshing = false
@@ -243,7 +253,7 @@ final class AppModel: ObservableObject {
         do {
             try FileManager.default.removeItem(atPath: versionDir)
             appendLog("Deleted from stash: \(versionDir)")
-            showToast("Removed \(stashed.version) from stash", style: .info)
+            showToast("Removed \(stashed.osName) from stash", style: .info)
             refreshStash()
         } catch {
             appendLog("ERROR deleting stash entry: \(error.localizedDescription)")
@@ -269,7 +279,7 @@ final class AppModel: ObservableObject {
 
     func requestCreate() {
         guard let drive = selectedDrive else {
-            showToast("Select a USB drive first", style: .warning)
+            showToast("Select a USB or external drive first", style: .warning)
             return
         }
         let warning: String
@@ -428,7 +438,7 @@ final class AppModel: ObservableObject {
         downloadProgress = 1.0
 
         guard let downloaded = findNewestInstallerInApplications() else {
-            throw AppError("Downloaded installer not found in /Applications -- check System Settings > Software Update")
+            throw AppError("Downloaded installer not found in /Applications. Check System Settings > Software Update.")
         }
 
         let appName = URL(fileURLWithPath: downloaded).lastPathComponent
@@ -466,13 +476,28 @@ final class AppModel: ObservableObject {
                 status = "Downloaded \(installer.version)"
                 showToast("Downloaded \(installer.displayName)", style: .success)
             } catch {
-                status = "Download failed"
-                appendLog("ERROR: \(error.localizedDescription)")
-                showToast("Download failed: \(error.localizedDescription)", style: .error)
+                if downloadWasCancelled {
+                    status = "Download cancelled"
+                    appendLog("Download cancelled by user")
+                    showToast("Download cancelled", style: .warning)
+                } else {
+                    status = "Download failed"
+                    appendLog("ERROR: \(error.localizedDescription)")
+                    showToast("Download failed: \(error.localizedDescription)", style: .error)
+                }
             }
             creating = false
             isDownloading = false
+            downloadWasCancelled = false
         }
+    }
+
+    func cancelDownload() {
+        guard isDownloading else { return }
+        downloadWasCancelled = true
+        status = "Cancelling..."
+        appendLog("Cancelling download...")
+        Task { await shell.cancelCurrent() }
     }
 
     // MARK: Actions
@@ -653,6 +678,13 @@ final class StreamCollector: @unchecked Sendable {
 }
 
 actor Shell {
+    private var currentProcess: Process?
+
+    /// Terminates the currently-running streaming process (used to cancel a download).
+    func cancelCurrent() {
+        currentProcess?.terminate()
+    }
+
     func run(_ command: String, _ arguments: [String], requireSudo: Bool = false) async throws -> ShellOutput {
         let process = Process()
         let outPipe = Pipe(), errPipe = Pipe()
@@ -725,8 +757,14 @@ actor Shell {
             }
         }
 
-        try process.run()
-        process.waitUntilExit()
+        // Async wait (instead of blocking waitUntilExit) so the actor stays
+        // responsive to cancelCurrent() while the download runs.
+        currentProcess = process
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+            process.terminationHandler = { _ in cont.resume() }
+            do { try process.run() } catch { cont.resume(throwing: error) }
+        }
+        currentProcess = nil
 
         outPipe.fileHandleForReading.readabilityHandler = nil
         errPipe.fileHandleForReading.readabilityHandler = nil
@@ -764,17 +802,90 @@ struct AppError: LocalizedError {
 // MARK: - Theme
 
 enum FFTheme {
+    // Vortenia brand palette (vortenia.com): electric lime on near-black, warm ink.
+    static let accent = Color(red: 0.77, green: 0.94, blue: 0.0)          // #c4f000
     static let accentGradient = LinearGradient(
-        colors: [Color(red: 0.35, green: 0.6, blue: 1.0), Color(red: 0.55, green: 0.35, blue: 1.0)],
+        colors: [Color(red: 0.77, green: 0.94, blue: 0.0),               // #c4f000
+                 Color(red: 0.84, green: 1.0, blue: 0.17)],              // #d6ff2b
         startPoint: .leading, endPoint: .trailing
     )
+    // Near-black Vortenia backdrop so panels read with depth instead of flat gray.
+    static let windowBackground = LinearGradient(
+        colors: [Color(red: 0.043, green: 0.043, blue: 0.043),           // #0b0b0b
+                 Color(red: 0.078, green: 0.078, blue: 0.078)],          // #141414
+        startPoint: .topLeading, endPoint: .bottomTrailing
+    )
     static let headerGradient = LinearGradient(
-        colors: [Color(red: 0.12, green: 0.12, blue: 0.16), Color(red: 0.08, green: 0.08, blue: 0.12)],
+        colors: [Color(red: 0.078, green: 0.078, blue: 0.078),           // #141414
+                 Color(red: 0.043, green: 0.043, blue: 0.043)],          // #0b0b0b
         startPoint: .top, endPoint: .bottom
     )
-    static let cardBg = Color(nsColor: NSColor.controlBackgroundColor).opacity(0.6)
-    static let subtleBorder = Color.white.opacity(0.06)
-    static let dimText = Color.secondary.opacity(0.8)
+    static let cardBg = Color(nsColor: NSColor.controlBackgroundColor).opacity(0.55)
+    static let subtleBorder = Color(red: 0.149, green: 0.149, blue: 0.141) // #262624 rule
+    static let dimText = Color(red: 0.60, green: 0.59, blue: 0.55)        // #9a968c ink-soft
+
+    // Shared corner-radius scale for visual consistency.
+    static let cardRadius: CGFloat = 12
+    static let controlRadius: CGFloat = 8
+}
+
+// MARK: - Button styles
+
+/// Solid lime call-to-action button. High contrast on the dark backdrop.
+struct FFPrimaryButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(.black)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: FFTheme.controlRadius)
+                    .fill(FFTheme.accent.opacity(isEnabled ? (configuration.isPressed ? 0.82 : 1) : 0.35))
+                    .shadow(color: FFTheme.accent.opacity(isEnabled ? 0.45 : 0), radius: 8)
+            )
+            .contentShape(Rectangle())
+    }
+}
+
+/// Filled lime-tinted chip with a bright border — unmistakably a button on black.
+struct FFSecondaryButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+    var tint: Color = FFTheme.accent
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(isEnabled ? tint : FFTheme.dimText)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: FFTheme.controlRadius)
+                    .fill(tint.opacity(isEnabled ? (configuration.isPressed ? 0.32 : 0.20) : 0.08))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: FFTheme.controlRadius)
+                    .stroke(tint.opacity(isEnabled ? 0.9 : 0.25), lineWidth: 1.5)
+            )
+            .contentShape(Rectangle())
+    }
+}
+
+/// Compact icon button: a clearly filled, bordered lime circle so glyph actions read as tappable.
+struct FFIconButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+    var tint: Color = FFTheme.accent
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(isEnabled ? tint : FFTheme.dimText)
+            .frame(width: 28, height: 28)
+            .background(
+                Circle().fill(tint.opacity(isEnabled ? (configuration.isPressed ? 0.32 : 0.20) : 0.08))
+            )
+            .overlay(Circle().stroke(tint.opacity(isEnabled ? 0.9 : 0.25), lineWidth: 1.5))
+            .contentShape(Circle())
+    }
 }
 
 // MARK: - Views
@@ -806,6 +917,9 @@ struct ContentView: View {
             .padding(.trailing, 20)
             .animation(.spring(response: 0.4), value: model.toasts.count)
         }
+        .background(FFTheme.windowBackground)
+        .preferredColorScheme(.dark)
+        .tint(FFTheme.accent)
         .frame(minWidth: 900, minHeight: 500, idealHeight: 700)
         .onAppear {
             stashPathInput = model.stashPath
@@ -850,6 +964,7 @@ struct ContentView: View {
                 }
                 .padding(16)
             }
+            .scrollContentBackground(.hidden)
 
             Spacer(minLength: 0)
 
@@ -860,14 +975,14 @@ struct ContentView: View {
 
     var headerBar: some View {
         HStack(spacing: 10) {
-            Image(systemName: "bolt.circle.fill")
+            Image(systemName: "externaldrive.fill")
                 .font(.title2)
                 .foregroundStyle(FFTheme.accentGradient)
 
             VStack(alignment: .leading, spacing: 1) {
-                Text("FlashForge")
+                Text("macOS Drive Forge")
                     .font(.system(size: 16, weight: .bold, design: .rounded))
-                Text("macOS USB Installer Builder")
+                Text("USB & external drive installer builder")
                     .font(.system(size: 11))
                     .foregroundStyle(FFTheme.dimText)
             }
@@ -886,9 +1001,8 @@ struct ContentView: View {
                         Image(systemName: "arrow.clockwise")
                     }
                 }
-                .frame(width: 20, height: 20)
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(FFIconButtonStyle())
             .help("Refresh all data")
             .disabled(model.isRefreshing)
         }
@@ -920,7 +1034,7 @@ struct ContentView: View {
                     } label: {
                         Image(systemName: "checkmark.circle")
                     }
-                    .buttonStyle(.borderless)
+                    .buttonStyle(FFIconButtonStyle())
                     .help("Set stash path")
                 }
 
@@ -954,8 +1068,8 @@ struct ContentView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(FFTheme.cardBg)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(FFTheme.subtleBorder))
+        .clipShape(RoundedRectangle(cornerRadius: FFTheme.controlRadius))
+        .overlay(RoundedRectangle(cornerRadius: FFTheme.controlRadius).stroke(FFTheme.subtleBorder))
     }
 
     var installerSection: some View {
@@ -968,7 +1082,7 @@ struct ContentView: View {
                         Image(systemName: "exclamationmark.triangle")
                             .foregroundStyle(.orange)
                     }
-                    Text(model.isRefreshing ? "Loading installers..." : "No installers found -- click Refresh")
+                    Text(model.isRefreshing ? "Loading installers..." : "No installers found. Click Refresh.")
                         .foregroundStyle(FFTheme.dimText)
                         .font(.caption)
                 }
@@ -1001,9 +1115,8 @@ struct ContentView: View {
                                     .font(.system(size: 12, weight: .medium))
                             }
                         }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .disabled(model.selectedInstaller == nil || model.creating)
+                        .buttonStyle(FFSecondaryButtonStyle())
+                        .disabled(model.creating)
 
                         if let sel = model.selectedInstaller, model.isCached(sel) {
                             HStack(spacing: 4) {
@@ -1021,10 +1134,24 @@ struct ContentView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             ProgressView(value: model.downloadProgress)
                                 .progressViewStyle(.linear)
-                                .tint(.blue)
-                            Text(model.status)
-                                .font(.system(size: 11))
-                                .foregroundStyle(FFTheme.dimText)
+                                .tint(FFTheme.accent)
+                            HStack(spacing: 6) {
+                                Text(model.status)
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(FFTheme.dimText)
+                                Spacer()
+                                Button {
+                                    model.cancelDownload()
+                                } label: {
+                                    HStack(spacing: 3) {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .font(.system(size: 10))
+                                        Text("Cancel")
+                                    }
+                                }
+                                .buttonStyle(FFSecondaryButtonStyle(tint: .red))
+                                .help("Stop the download")
+                            }
                         }
                         .padding(.top, 4)
                     }
@@ -1044,19 +1171,16 @@ struct ContentView: View {
                         model.addPlan()
                     } label: {
                         Label("Add Volume", systemImage: "plus.circle")
-                            .font(.system(size: 12, weight: .medium))
                     }
-                    .buttonStyle(.borderless)
+                    .buttonStyle(FFSecondaryButtonStyle())
 
                     if model.volumePlans.count > 1 {
                         Button {
                             if let last = model.volumePlans.last { model.removePlan(last) }
                         } label: {
                             Label("Remove Last", systemImage: "minus.circle")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(.red)
                         }
-                        .buttonStyle(.borderless)
+                        .buttonStyle(FFSecondaryButtonStyle(tint: .red))
                     }
                 }
             }
@@ -1070,7 +1194,7 @@ struct ContentView: View {
                     HStack(spacing: 6) {
                         Image(systemName: "externaldrive.badge.questionmark")
                             .foregroundStyle(.orange)
-                        Text("No external drives found -- plug in a USB and Refresh")
+                        Text("No external drives found. Plug in a USB and Refresh.")
                             .foregroundStyle(FFTheme.dimText)
                             .font(.caption)
                             .fixedSize(horizontal: false, vertical: true)
@@ -1080,7 +1204,7 @@ struct ContentView: View {
                         Picker("", selection: $model.selectedDrive) {
                             Text("Select...").tag(Optional<USBDrive>.none)
                             ForEach(model.drives) { drive in
-                                Text("\(drive.label) -- \(drive.sizeDescription) (\(drive.device))")
+                                Text("\(drive.label) · \(drive.sizeDescription) (\(drive.device))")
                                     .tag(Optional(drive))
                             }
                         }
@@ -1100,11 +1224,9 @@ struct ContentView: View {
                         Image(systemName: "arrow.clockwise")
                             .font(.system(size: 11))
                         Text("Rescan Drives")
-                            .font(.system(size: 12, weight: .medium))
                     }
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+                .buttonStyle(FFSecondaryButtonStyle())
             }
         }
     }
@@ -1123,18 +1245,15 @@ struct ContentView: View {
                             ProgressView()
                                 .controlSize(.small)
                                 .scaleEffect(0.7)
+                                .tint(.black)
                         } else {
-                            Image(systemName: "bolt.fill")
+                            Image(systemName: "hammer.fill")
                         }
-                        Text(model.creating ? "Preparing..." : "Prepare USB")
-                            .font(.system(size: 13, weight: .semibold))
+                        Text(model.creating ? "Preparing..." : "Prepare Drive")
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 6)
                 }
-                .disabled(model.creating || model.selectedDrive == nil)
-                .buttonStyle(.borderedProminent)
-                .tint(Color(red: 0.35, green: 0.55, blue: 1.0))
+                .disabled(model.creating)
+                .buttonStyle(FFPrimaryButtonStyle())
 
                 // Secondary actions
                 Button {
@@ -1144,7 +1263,7 @@ struct ContentView: View {
                 }
                 .disabled(model.pendingTerminalCommand.isEmpty)
                 .help("Copy command to clipboard")
-                .buttonStyle(.bordered)
+                .buttonStyle(FFIconButtonStyle())
 
                 Button {
                     model.runPendingInTerminal()
@@ -1153,7 +1272,7 @@ struct ContentView: View {
                 }
                 .disabled(model.pendingTerminalCommand.isEmpty)
                 .help("Run in Terminal")
-                .buttonStyle(.bordered)
+                .buttonStyle(FFIconButtonStyle())
             }
             .padding(12)
         }
@@ -1180,7 +1299,7 @@ struct ContentView: View {
                         Image(systemName: "doc.on.doc")
                             .font(.caption)
                     }
-                    .buttonStyle(.borderless)
+                    .buttonStyle(FFIconButtonStyle())
                     .help("Copy logs")
                 }
             }
@@ -1213,7 +1332,7 @@ struct ContentView: View {
                             .foregroundStyle(.green.opacity(0.9))
                             .padding(10)
                             .background(Color.black.opacity(0.3))
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                            .clipShape(RoundedRectangle(cornerRadius: FFTheme.controlRadius))
                     }
                     .frame(minHeight: 60, maxHeight: 140)
                 }
@@ -1248,6 +1367,7 @@ struct ContentView: View {
                         Color.clear.frame(height: 1).id("logBottom")
                     }
                 }
+                .scrollContentBackground(.hidden)
                 .onChange(of: model.logs) { _, _ in
                     withAnimation {
                         proxy.scrollTo("logBottom", anchor: .bottom)
@@ -1255,6 +1375,28 @@ struct ContentView: View {
                 }
             }
             .frame(maxHeight: .infinity)
+
+            brandFooter
+        }
+    }
+
+    // Vortenia brand strip at the foot of the output panel.
+    var brandFooter: some View {
+        HStack(spacing: 6) {
+            Text("macOS Drive Forge")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(FFTheme.dimText)
+            Spacer()
+            Text("VORTENIA")
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .tracking(2)
+                .foregroundStyle(FFTheme.accent)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(FFTheme.headerGradient)
+        .overlay(alignment: .top) {
+            Rectangle().fill(FFTheme.subtleBorder).frame(height: 1)
         }
     }
 }
@@ -1270,7 +1412,7 @@ struct WorkflowIndicator: View {
                 HStack(spacing: 4) {
                     ZStack {
                         Circle()
-                            .fill(phase.rawValue <= currentPhase.rawValue ? Color.blue : Color.gray.opacity(0.3))
+                            .fill(phase.rawValue <= currentPhase.rawValue ? FFTheme.accent : Color.gray.opacity(0.3))
                             .frame(width: 24, height: 24)
 
                         if phase.rawValue < currentPhase.rawValue {
@@ -1291,7 +1433,7 @@ struct WorkflowIndicator: View {
 
                 if phase != WorkflowPhase.allCases.last {
                     Rectangle()
-                        .fill(phase.rawValue < currentPhase.rawValue ? Color.blue : Color.gray.opacity(0.3))
+                        .fill(phase.rawValue < currentPhase.rawValue ? FFTheme.accent : Color.gray.opacity(0.3))
                         .frame(height: 2)
                         .frame(maxWidth: .infinity)
                         .padding(.horizontal, 4)
@@ -1322,8 +1464,9 @@ struct CardView<Content: View>: View {
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(FFTheme.cardBg)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(FFTheme.subtleBorder))
+        .clipShape(RoundedRectangle(cornerRadius: FFTheme.cardRadius))
+        .overlay(RoundedRectangle(cornerRadius: FFTheme.cardRadius).stroke(FFTheme.subtleBorder))
+        .shadow(color: .black.opacity(0.22), radius: 8, y: 3)
     }
 }
 
@@ -1341,9 +1484,9 @@ struct ToastView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .clipShape(RoundedRectangle(cornerRadius: FFTheme.cardRadius))
         .overlay(
-            RoundedRectangle(cornerRadius: 10)
+            RoundedRectangle(cornerRadius: FFTheme.cardRadius)
                 .stroke(toast.style.color.opacity(0.3), lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.2), radius: 8, y: 4)
@@ -1362,10 +1505,10 @@ struct StashedInstallerRow: View {
                 .font(.system(size: 14))
 
             VStack(alignment: .leading, spacing: 2) {
-                Text("macOS \(stashed.version)")
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
-                Text(stashed.sizeDescription)
-                    .font(.system(size: 10))
+                Text(stashed.osName)
+                    .font(.system(size: 12, weight: .semibold))
+                Text("\(stashed.version) · \(stashed.sizeDescription)")
+                    .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(FFTheme.dimText)
             }
 
@@ -1375,16 +1518,15 @@ struct StashedInstallerRow: View {
                 model.deleteFromStash(stashed)
             } label: {
                 Image(systemName: "trash")
-                    .foregroundStyle(.red.opacity(0.7))
                     .font(.system(size: 12))
             }
-            .buttonStyle(.borderless)
-            .help("Delete \(stashed.version) from stash")
+            .buttonStyle(FFIconButtonStyle(tint: .red))
+            .help("Delete \(stashed.osName) from stash")
         }
         .padding(.vertical, 4)
         .padding(.horizontal, 6)
         .background(Color.green.opacity(0.04))
-        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .clipShape(RoundedRectangle(cornerRadius: FFTheme.controlRadius))
     }
 }
 
@@ -1395,7 +1537,7 @@ struct InstallerPickerLabel: View {
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: isCached ? "checkmark.circle.fill" : "arrow.down.circle")
-                .foregroundStyle(isCached ? .green : .blue)
+                .foregroundStyle(isCached ? Color.green : FFTheme.accent)
             Text(installer.displayName)
         }
     }
@@ -1432,7 +1574,7 @@ struct DriveCapacityBar: View {
         }
         .padding(8)
         .background(FFTheme.cardBg)
-        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .clipShape(RoundedRectangle(cornerRadius: FFTheme.controlRadius))
     }
 
     var capacityFraction: CGFloat {
@@ -1473,7 +1615,7 @@ struct MultiVolumePlanRow: View {
         .padding(.vertical, 4)
         .padding(.horizontal, 6)
         .background(FFTheme.cardBg.opacity(0.5))
-        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .clipShape(RoundedRectangle(cornerRadius: FFTheme.controlRadius))
     }
 }
 
@@ -1481,10 +1623,45 @@ struct MultiVolumePlanRow: View {
 
 @main
 struct FlashForgeApp: App {
+    private static let homeURL = "https://vortenia.com"
+
     var body: some Scene {
-        WindowGroup("FlashForge -- macOS USB Installer Builder") {
+        WindowGroup("macOS Drive Forge") {
             ContentView()
         }
         .windowResizability(.contentMinSize)
+        .commands {
+            // Custom About panel (replaces the bare default).
+            CommandGroup(replacing: .appInfo) {
+                Button("About macOS Drive Forge") { Self.showAboutPanel() }
+            }
+            // The default Help menu has no help book ("No help available").
+            // Point it at the Vortenia site instead.
+            CommandGroup(replacing: .help) {
+                Button("macOS Drive Forge Help") {
+                    if let url = URL(string: Self.homeURL) {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                .keyboardShortcut("?", modifiers: .command)
+            }
+        }
+    }
+
+    private static func showAboutPanel() {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "2.0"
+        let credits = NSAttributedString(
+            string: "Put multiple macOS installers on one USB or external drive.\n\nMIT License · vortenia.com",
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 11),
+                .foregroundColor: NSColor.secondaryLabelColor
+            ]
+        )
+        NSApplication.shared.orderFrontStandardAboutPanel(options: [
+            .applicationName: "macOS Drive Forge",
+            .applicationVersion: version,
+            .credits: credits,
+            NSApplication.AboutPanelOptionKey(rawValue: "Copyright"): "© 2026 Vortenia"
+        ])
     }
 }

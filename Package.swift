@@ -2,12 +2,12 @@
 import PackageDescription
 
 let package = Package(
-    name: "FlashForge",
+    name: "DriveForge",
     platforms: [
         .macOS(.v14)
     ],
     products: [
-        .executable(name: "FlashForge", targets: ["macos-installer-usb-builder"])
+        .executable(name: "DriveForge", targets: ["macos-installer-usb-builder"])
     ],
     targets: [
         .executableTarget(
