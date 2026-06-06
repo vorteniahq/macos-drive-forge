@@ -2,8 +2,6 @@
 
 Put multiple macOS installers on a single USB stick or external drive.
 
-![macOS Drive Forge](docs/screenshot.png)
-
 ## What it is
 
 macOS Drive Forge is a native macOS app for building bootable macOS installer drives. Its standout feature: it can place **several macOS versions on one drive** (for example Sonoma, Sequoia, and Tahoe side by side), so a single USB stick or external hard drive can reinstall or boot any of them. It also handles the everyday single-installer job, without making you memorize `createinstallmedia` flags.
