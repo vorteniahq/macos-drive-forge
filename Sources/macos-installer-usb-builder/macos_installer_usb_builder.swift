@@ -892,6 +892,7 @@ struct FFIconButtonStyle: ButtonStyle {
 
 struct ContentView: View {
     @StateObject private var model = AppModel()
+    @StateObject private var updates = UpdateChecker()
     @State private var stashPathInput: String = ""
 
     var body: some View {
@@ -916,7 +917,21 @@ struct ContentView: View {
             .padding(.top, 12)
             .padding(.trailing, 20)
             .animation(.spring(response: 0.4), value: model.toasts.count)
+
+            // Update banner (bottom-trailing, dismissible)
+            if updates.updateAvailable {
+                VStack {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        UpdateBanner(updates: updates)
+                    }
+                }
+                .padding(16)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
         }
+        .animation(.spring(response: 0.4), value: updates.updateAvailable)
         .background(FFTheme.windowBackground)
         .preferredColorScheme(.dark)
         .tint(FFTheme.accent)
@@ -924,6 +939,7 @@ struct ContentView: View {
         .onAppear {
             stashPathInput = model.stashPath
             model.refreshAll()
+            updates.checkIfDue()
         }
         .alert("Confirm Destructive Action", isPresented: $model.showDestructiveConfirm) {
             Button("Erase & Continue", role: .destructive) { model.confirmCreate() }
@@ -1616,6 +1632,103 @@ struct MultiVolumePlanRow: View {
         .padding(.horizontal, 6)
         .background(FFTheme.cardBg.opacity(0.5))
         .clipShape(RoundedRectangle(cornerRadius: FFTheme.controlRadius))
+    }
+}
+
+// MARK: - Update check (daily, anonymous)
+
+/// Once a day, fetches a static JSON from vortenia.com and compares `latest`
+/// against the running version. Nothing is sent beyond the HTTP request itself
+/// (the User-Agent carries the running version so release adoption is visible
+/// server-side). No machine ID, no payload. Mirrors Overwatch's check.
+@MainActor
+final class UpdateChecker: ObservableObject {
+    @Published var updateAvailable = false
+    @Published var latestVersion = ""
+    @Published private(set) var releasePage = URL(string: "https://vortenia.com/drive-forge/")!
+
+    private static let checkURL = "https://vortenia.com/version/drive-forge.json"
+    private static let lastCheckKey = "lastUpdateCheck"
+    private static let skippedKey = "skippedUpdateVersion"
+
+    static var currentVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "2.1.0"
+    }
+
+    /// Check at most once per 20h, so launches within a day count once.
+    func checkIfDue() {
+        let last = UserDefaults.standard.double(forKey: Self.lastCheckKey)
+        guard Date().timeIntervalSince1970 - last > 20 * 3600 else { return }
+        check()
+    }
+
+    func check() {
+        guard let url = URL(string: Self.checkURL) else { return }
+        var req = URLRequest(url: url)
+        req.setValue("DriveForge/\(Self.currentVersion)", forHTTPHeaderField: "User-Agent")
+        req.cachePolicy = .reloadIgnoringLocalCacheData
+        req.timeoutInterval = 10
+        Task {
+            UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: Self.lastCheckKey)
+            guard let (data, _) = try? await URLSession.shared.data(for: req),
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let latest = obj["latest"] as? String else { return }
+            if let page = (obj["url"] as? String).flatMap(URL.init(string:)) {
+                self.releasePage = page
+            }
+            let skipped = UserDefaults.standard.string(forKey: Self.skippedKey)
+            self.latestVersion = latest
+            self.updateAvailable = Self.isNewer(latest, than: Self.currentVersion) && latest != skipped
+        }
+    }
+
+    func openReleasePage() { NSWorkspace.shared.open(releasePage) }
+
+    func skipThisVersion() {
+        UserDefaults.standard.set(latestVersion, forKey: Self.skippedKey)
+        updateAvailable = false
+    }
+
+    nonisolated static func isNewer(_ candidate: String, than current: String) -> Bool {
+        func parts(_ s: String) -> [Int] { s.split(separator: ".").compactMap { Int($0) } }
+        let a = parts(candidate), b = parts(current)
+        guard !a.isEmpty, !b.isEmpty else { return false }
+        for i in 0..<max(a.count, b.count) {
+            let x = i < a.count ? a[i] : 0
+            let y = i < b.count ? b[i] : 0
+            if x != y { return x > y }
+        }
+        return false
+    }
+}
+
+/// Slim dismissible pill shown bottom-trailing when an update exists.
+struct UpdateBanner: View {
+    @ObservedObject var updates: UpdateChecker
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "arrow.down.circle.fill")
+                .foregroundStyle(FFTheme.accent)
+            Text("Drive Forge \(updates.latestVersion) is available")
+                .font(.system(size: 12, weight: .medium))
+            Button("Get update") { updates.openReleasePage() }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            Button { updates.skipThisVersion() } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Skip this version")
+        }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 12)
+        .background(FFTheme.cardBg)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(FFTheme.accent.opacity(0.4), lineWidth: 1))
+        .shadow(color: .black.opacity(0.35), radius: 12, y: 4)
     }
 }
 

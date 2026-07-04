@@ -17,6 +17,7 @@ Under the hood it drives Apple's own tools (`softwareupdate`, `diskutil`, `creat
 - **Browse and download** any Apple full installer (Sonoma, Sequoia, Tahoe, ...) straight from Apple.
 - **Local installer stash** (`~/InstallerStash` by default), labeled by macOS name, so you don't re-download.
 - **Live progress**, a workflow indicator, and drive-capacity bars as you go.
+- **Update aware.** Once a day the app checks vortenia.com for a newer version and shows a quiet, dismissible banner if one exists. The check is anonymous: nothing is sent beyond the request itself (the User-Agent carries the running version). No machine ID, no payload.
 
 ## Who it's for
 
