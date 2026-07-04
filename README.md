@@ -46,7 +46,7 @@ swift run DriveForge
 
 Double-click **`Run-Drive-Forge.command`**. On first run it builds a release binary, assembles `macOS Drive Forge.app`, and opens it.
 
-> macOS may block an unsigned app the first time. If so, right-click the app, choose **Open**, then confirm.
+> macOS blocks unsigned apps on first launch. On macOS 15 Sequoia and later, approve the app under **System Settings > Privacy & Security > Open Anyway**. On macOS 14 or earlier, right-click the app and choose **Open**.
 
 ## Safety
 
