@@ -2,6 +2,8 @@
 
 Put multiple macOS installers on a single USB stick or external drive.
 
+**[Download the DMG (latest release)](https://github.com/vorteniahq/macos-drive-forge/releases/latest)** · macOS 14+ · free, MIT · [vortenia.com/drive-forge](https://vortenia.com/drive-forge/)
+
 ![macOS Drive Forge](docs/screenshot.png)
 
 ## What it is
